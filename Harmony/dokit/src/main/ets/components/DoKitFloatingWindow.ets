@@ -1,20 +1,22 @@
 import { GlobalConfig } from '../config/GlobalConfig';
 import { DokitMemoryConfig } from '../config/DokitMemoryConfig';
 import { CustomDoKitViewRenderer, CustomFragmentRenderer, DoKitIntent, DoKitViewCloseHandler } from '../core/DoKitIntent';
-import { DoKitViewManager, ViewConfig } from '../core/DoKitViewManager';
+import { DoKitViewManager } from '../core/DoKitViewManager';
 import { buildUniversalFragment, SystemFragmentRegistry } from '../core/SystemFragmentRigistry';
 import { DoKitManager } from '../core/DoKitManager';
 import { MainIconDoKitView } from '../core/main/MainIconDoKitView';
 import { ToolPanelDoKitView } from '../core/toolpanel/ToolPanelDoKitView';
 import { PerformanceDokitViewManager } from '../kit/performance/PerformanceDokitViewManager';
-import { PerformanceDoKitView } from '../kit/performance/PerformanceDoKitView';
 import { FpsFrameCollector } from '../kit/performance/FpsFrameCollector';
-import { DataSourceFactory } from '../kit/performance/datasource/DataSourceFactory';
 import { DoKitOverlayState } from '../model/DoKitOverlayState';
 import { KitGroup } from '../model/KitModels';
 import { DoKitBundle } from '../core/FragmentRenderer';
-import { ViewConfigDoKitView } from '../core/ViewConfigDoKitView';
+import { DoKitInjectSubWindow } from '../subwindow/DoKitInjectSubWindow';
+import { DoKitPerformanceSubWindow } from '../subwindow/DoKitPerformanceSubWindow';
 import { window } from '@kit.ArkUI';
+import display from '@ohos.display';
+import { DoKitSubWindow } from '../subwindow/DoKitSubWindow';
+import { DOKIT_OVERLAY_WINDOW_NAME } from '../subwindow/DoKitSubWindowRoute';
 
 @Builder
 function defaultCustomFullScreenPage(_fragmentClass: string, _bundle: DoKitBundle, _onClose: () => void) {
@@ -23,7 +25,7 @@ function defaultCustomFullScreenPage(_fragmentClass: string, _bundle: DoKitBundl
 
 /**
  * DoKit Overlay 根容器，对标 Android DoKitFrameLayout + DoKitViewManager 挂载点
- * 宿主：Stack() { 业务页; DoKitFloatingWindow() }
+ * 推荐 DoKitSubWindow；亦可 Stack() { 业务页; DoKitFloatingWindow() }
  */
 @Component
 export struct DoKitFloatingWindow {
@@ -32,6 +34,7 @@ export struct DoKitFloatingWindow {
   private readonly ballSize: number = 58;
   private readonly ballMarginRight: number = 16;
   private readonly ballMarginBottom: number = 108;
+  private readonly iconChromePadVp: number = 12;
 
   @State private containerWidth: number = 0;
   @State private containerHeight: number = 0;
@@ -44,14 +47,11 @@ export struct DoKitFloatingWindow {
   @State private showCustomFloat: boolean = false;
   @State private activeFloatingClass: string = '';
   @State private activeFloatingBundle: DoKitBundle = {};
-  @State private showFpsOverlay: boolean = false;
-  @State private showCpuOverlay: boolean = false;
-  @State private showRamOverlay: boolean = false;
   @State private fpsMonitorActive: boolean = false;
-  @State private viewRefresh: number = 0;
-  @State private viewConfigs:ViewConfig[]= [];
+  @State private subWindowIconChrome: boolean = false;
+  @State private subWindowDragExpanded: boolean = false;
 
-  @StorageLink(DoKitOverlayState.ICON_VISIBLE_KEY) iconVisible: boolean = true;
+  @StorageLink(DoKitOverlayState.ICON_VISIBLE_KEY) @Watch('syncSubWindowWindowChrome') iconVisible: boolean = true;
   @StorageLink(DoKitOverlayState.PANEL_OPEN_KEY) @Watch('onPanelOpenRequest') panelOpenRequest: boolean = false;
   /** 壳 EntryAbility 写入的状态栏高度（px）；用 StorageProp 才能跟着避让区变化刷新 */
   @StorageProp('topRectHeight') private topRectHeightPx: number = 0;
@@ -62,6 +62,7 @@ export struct DoKitFloatingWindow {
         this.kitGroups = DoKitManager.getKitGroups();
       }
       this.showPanel = visible;
+      this.syncSubWindowWindowChrome();
     });
     SystemFragmentRegistry.setOpenHandler((fragmentClass: string, isSystemFragment: boolean) => {
       this.openFragment(fragmentClass, isSystemFragment);
@@ -73,24 +74,30 @@ export struct DoKitFloatingWindow {
       this.activeFloatingClass = intent.targetClass;
       this.activeFloatingBundle = intent.bundle;
       this.showCustomFloat = true;
+      this.syncSubWindowWindowChrome();
     });
     DoKitViewManager.setFloatingDetachHandler(() => {
       this.showCustomFloat = false;
       this.activeFloatingClass = '';
       this.activeFloatingBundle = {};
+      this.syncSubWindowWindowChrome();
     });
 
     DoKitViewManager.setWindowRefreshHandler(() => {
-      this.viewRefresh = 0;
-      this.viewConfigs = DoKitViewManager.getViewConfigList();
-      // 为了触发重新渲染，先使用0清除数据，然后重新添加到视图上
-      this.viewRefresh ++;
+      this.syncSubWindowWindowChrome();
+      this.syncInjectSubWindow();
+      this.syncPerformanceSubWindow();
     })
 
     PerformanceDokitViewManager.setOverlayChangeHandler(() => {
-      this.syncPerformanceOverlayState();
+      this.fpsMonitorActive = DokitMemoryConfig.FPS_STATUS;
+      this.syncPerformanceSubWindow();
     });
-    this.syncPerformanceOverlayState();
+    this.fpsMonitorActive = DokitMemoryConfig.FPS_STATUS;
+    this.syncPerformanceSubWindow();
+    if (DoKitSubWindow.isShowing()) {
+      this.initBallPosition();
+    }
   }
 
   aboutToDisappear(): void {
@@ -103,69 +110,152 @@ export struct DoKitFloatingWindow {
     PerformanceDokitViewManager.setOverlayChangeHandler(null);
   }
 
-  private syncPerformanceOverlayState(): void {
-    this.showFpsOverlay = PerformanceDokitViewManager.isFpsOverlayOpen();
-    this.showCpuOverlay = PerformanceDokitViewManager.isCpuOverlayOpen();
-    this.showRamOverlay = PerformanceDokitViewManager.isRamOverlayOpen();
-    this.fpsMonitorActive = DokitMemoryConfig.FPS_STATUS;
-  }
-
-  private getPerformanceOverlayTop(showFps: boolean, showCpu: boolean, performanceType: number): number {
-    let top = 88;
-    if (performanceType === DataSourceFactory.TYPE_CPU || performanceType === DataSourceFactory.TYPE_RAM) {
-      if (showFps) {
-        top += 52;
-      }
-    }
-    if (performanceType === DataSourceFactory.TYPE_RAM && showCpu) {
-      top += 52;
-    }
-    return top;
-  }
-
   private onPanelOpenRequest(): void {
     if (this.panelOpenRequest) {
       this.kitGroups = DoKitManager.getKitGroups();
       this.showPanel = true;
       DoKitOverlayState.clearPanelOpenRequest();
+      this.syncSubWindowWindowChrome();
     }
+  }
+
+  private syncBallPositionFromIconChrome(): void {
+    const uiContext = this.getUIContext();
+    const leftPx = DoKitSubWindow.getIconChromeLeftPx();
+    const topPx = DoKitSubWindow.getIconChromeTopPx();
+    this.ballX = uiContext.px2vp(leftPx) + this.iconChromePadVp;
+    this.ballY = uiContext.px2vp(topPx) + this.iconChromePadVp;
+    this.clampBallToLayout(this.queryLayoutWidthVp(), this.queryLayoutHeightVp());
+  }
+
+  private clampBallToLayout(layoutWidth: number, layoutHeight: number): void {
+    if (layoutWidth <= 0 || layoutHeight <= 0) {
+      return;
+    }
+    const maxX = Math.max(0, layoutWidth - this.ballSize);
+    const maxY = Math.max(0, layoutHeight - this.ballSize);
+    this.ballX = this.clamp(this.ballX, 0, maxX);
+    this.ballY = this.clamp(this.ballY, 0, maxY);
+  }
+
+  private beginChromeDrag(): void {
+    if (DoKitSubWindow.isShowing() && this.subWindowIconChrome && !this.subWindowDragExpanded) {
+      this.syncBallPositionFromIconChrome();
+    }
+    this.subWindowDragExpanded = true;
+    DoKitSubWindow.layoutAsFullScreenChrome();
+  }
+
+  private endChromeDrag(): void {
+    this.subWindowDragExpanded = false;
+    this.syncSubWindowWindowChrome();
+  }
+
+  private queryLayoutWidthVp(): number {
+    if (DoKitSubWindow.isShowing()) {
+      try {
+        return this.getUIContext().px2vp(display.getDefaultDisplaySync().width);
+      } catch (_e) {
+      }
+    }
+    return this.containerWidth;
+  }
+
+  private queryLayoutHeightVp(): number {
+    if (DoKitSubWindow.isShowing()) {
+      try {
+        return this.getUIContext().px2vp(display.getDefaultDisplaySync().height);
+      } catch (_e) {
+      }
+    }
+    return this.containerHeight;
+  }
+
+  private syncSubWindowWindowChrome(): void {
+    if (!DoKitSubWindow.isShowing()) {
+      this.subWindowIconChrome = false;
+      this.subWindowDragExpanded = false;
+      return;
+    }
+    // 拖拽全屏态下禁止 sync（FPS 刷新等会反复触发），避免 resize 导致 Pan offset 跳变
+    if (this.subWindowDragExpanded) {
+      return;
+    }
+    if (this.shouldBlockHitThrough()) {
+      this.subWindowIconChrome = false;
+      DoKitSubWindow.layoutAsFullScreenChrome();
+      return;
+    }
+    if (!this.iconVisible) {
+      this.subWindowIconChrome = false;
+      DoKitSubWindow.layoutAsHiddenChrome();
+      return;
+    }
+    if (!this.ensureBallPositionReady()) {
+      this.subWindowIconChrome = false;
+      DoKitSubWindow.layoutAsFullScreenChrome();
+      return;
+    }
+    this.subWindowIconChrome = true;
+    const uiContext = this.getUIContext();
+    const pad = this.iconChromePadVp;
+    DoKitSubWindow.layoutAsIconChrome(
+      uiContext.vp2px(this.ballX - pad),
+      uiContext.vp2px(this.ballY - pad),
+      uiContext.vp2px(this.ballSize + pad * 2),
+      uiContext.vp2px(this.ballSize + pad * 2)
+    );
   }
 
   private clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
   }
 
-  private initBallPosition(): void {
-    if (this.containerWidth <= 0 || this.containerHeight <= 0) {
-      return;
+  private ensureBallPositionReady(): boolean {
+    const layoutWidth = this.queryLayoutWidthVp();
+    const layoutHeight = this.queryLayoutHeightVp();
+    if (layoutWidth <= 0 || layoutHeight <= 0) {
+      return false;
     }
-    const maxX = Math.max(0, this.containerWidth - this.ballSize);
-    const maxY = Math.max(0, this.containerHeight - this.ballSize);
+    const maxX = Math.max(0, layoutWidth - this.ballSize);
+    const maxY = Math.max(0, layoutHeight - this.ballSize);
     if (this.ballX === 0 && this.ballY === 0) {
       this.ballX = this.clamp(maxX - this.ballMarginRight, 0, maxX);
       this.ballY = this.clamp(maxY - this.ballMarginBottom, 0, maxY);
+    } else {
+      this.clampBallToLayout(layoutWidth, layoutHeight);
+    }
+    return true;
+  }
+
+  private initBallPosition(): void {
+    if (this.subWindowDragExpanded) {
       return;
     }
-    this.ballX = this.clamp(this.ballX, 0, maxX);
-    this.ballY = this.clamp(this.ballY, 0, maxY);
+    if (!this.ensureBallPositionReady()) {
+      return;
+    }
+    this.syncSubWindowWindowChrome();
   }
 
   private closeFragment(): void {
     SystemFragmentRegistry.clearContent();
     this.activeFragmentClass = '';
     this.activeIsSystemFragment = false;
+    this.syncSubWindowWindowChrome();
   }
 
   private openFragment(fragmentClass: string, isSystemFragment: boolean): void {
     DoKitViewManager.detachToolPanel();
     this.activeFragmentClass = fragmentClass;
     this.activeIsSystemFragment = isSystemFragment;
+    this.syncSubWindowWindowChrome();
   }
 
   /**
    * 顶避让高度。对齐壳 WebViewPage：
-   * 仅窗口 layoutFullScreen（沉浸式）时加 topRectHeight；非全屏内容已在安全区，再加会空一截。
-   * 读不到窗口属性时仍按 topRectHeight 避让，避免标题与状态栏重合。
+   * 仅承载 DoKit 的窗口 layoutFullScreen（沉浸式）时加 topRectHeight；非全屏内容已在安全区，再加会空一截。
+   * SubWindow 面板/拖拽全屏看子窗；Stack 叠层看主窗。读不到窗口属性时用 topRectHeight 兜底。
    */
   private statusBarHeightVp(): number {
     if (!this.shouldAvoidStatusBar()) {
@@ -175,6 +265,19 @@ export struct DoKitFloatingWindow {
   }
 
   private shouldAvoidStatusBar(): boolean {
+    if (DoKitSubWindow.isShowing()) {
+      try {
+        if (window.findWindow(DOKIT_OVERLAY_WINDOW_NAME).getWindowProperties().isLayoutFullScreen) {
+          return true;
+        }
+      } catch (_err) {
+      }
+      // 子窗 resize/layoutFullScreen 与 UI 刷新可能不同步，有全屏内容时仍避让
+      if (this.shouldBlockHitThrough() || this.subWindowDragExpanded) {
+        return true;
+      }
+      return false;
+    }
     try {
       const stage = AppStorage.get<window.WindowStage>('windowStage');
       if (stage === undefined || stage === null) {
@@ -187,8 +290,25 @@ export struct DoKitFloatingWindow {
   }
 
   private shouldBlockHitThrough(): boolean {
-    return this.activeFragmentClass.length > 0 || this.showPanel || this.showCustomFloat ||
-      this.showFpsOverlay || this.showCpuOverlay || this.showRamOverlay;
+    return this.activeFragmentClass.length > 0 || this.showPanel || this.showCustomFloat;
+  }
+
+  private syncPerformanceSubWindow(): void {
+    if (!PerformanceDokitViewManager.isFpsOverlayOpen() &&
+      !PerformanceDokitViewManager.isCpuOverlayOpen() &&
+      !PerformanceDokitViewManager.isRamOverlayOpen()) {
+      DoKitPerformanceSubWindow.hide();
+      return;
+    }
+    DoKitPerformanceSubWindow.ensureShown();
+  }
+
+  private syncInjectSubWindow(): void {
+    if (DoKitViewManager.getViewConfigList().length === 0) {
+      DoKitInjectSubWindow.hide();
+      return;
+    }
+    DoKitInjectSubWindow.ensureShown();
   }
 
   @Builder
@@ -231,81 +351,34 @@ export struct DoKitFloatingWindow {
           .backgroundColor(Color.White)
           .hitTestBehavior(HitTestMode.Default)
         } else if (this.iconVisible) {
-          Row() {
-            MainIconDoKitView({
-              ballSize: this.ballSize,
-              ballX: $ballX,
-              ballY: $ballY,
-              containerWidth: this.containerWidth,
-              containerHeight: this.containerHeight
-            })
-          }
-          .width('100%')
-          .height('100%')
-          .hitTestBehavior(HitTestMode.Transparent)
+          MainIconDoKitView({
+            ballSize: this.ballSize,
+            ballX: $ballX,
+            ballY: $ballY,
+            containerWidth: this.queryLayoutWidthVp(),
+            containerHeight: this.queryLayoutHeightVp(),
+            subWindowIconIdle: this.subWindowIconChrome && !this.subWindowDragExpanded,
+            onChromeDragStart: DoKitSubWindow.isShowing() ? () => {
+              this.beginChromeDrag();
+            } : undefined,
+            onChromeDragEnd: DoKitSubWindow.isShowing() ? () => {
+              this.endChromeDrag();
+            } : undefined,
+            onChromeLayoutSync: DoKitSubWindow.isShowing() ? () => {
+              this.syncSubWindowWindowChrome();
+            } : undefined
+          })
         }
 
         if (this.fpsMonitorActive) {
           FpsFrameCollector()
         }
 
-        if (this.showFpsOverlay) {
-          PerformanceDoKitView({
-            performanceType: DataSourceFactory.TYPE_FPS,
-            title: '帧率',
-            unit: 'FPS',
-            topOffset: 88,
-            onClose: () => {
-              PerformanceDokitViewManager.closeOverlayFromView(DataSourceFactory.TYPE_FPS);
-              this.syncPerformanceOverlayState();
-            }
-          })
-        }
-
-        if (this.showCpuOverlay) {
-          PerformanceDoKitView({
-            performanceType: DataSourceFactory.TYPE_CPU,
-            title: 'CPU',
-            unit: '%',
-            topOffset: this.getPerformanceOverlayTop(this.showFpsOverlay, false, DataSourceFactory.TYPE_CPU),
-            onClose: () => {
-              PerformanceDokitViewManager.closeOverlayFromView(DataSourceFactory.TYPE_CPU);
-              this.syncPerformanceOverlayState();
-            }
-          })
-        }
-
-        if (this.showRamOverlay) {
-          PerformanceDoKitView({
-            performanceType: DataSourceFactory.TYPE_RAM,
-            title: '内存',
-            unit: 'MB',
-            topOffset: this.getPerformanceOverlayTop(this.showFpsOverlay, this.showCpuOverlay,
-              DataSourceFactory.TYPE_RAM),
-            onClose: () => {
-              PerformanceDokitViewManager.closeOverlayFromView(DataSourceFactory.TYPE_RAM);
-              this.syncPerformanceOverlayState();
-            }
-          })
-        }
-
-        if (this.viewRefresh >= 0 && this.viewConfigs.length > 0) {
-          ForEach(this.viewConfigs, (config: ViewConfig) => {
-            Column() {
-              ViewConfigDoKitView({
-                config: config,
-                containerWidth: this.containerWidth,
-                containerHeight: this.containerHeight
-              })
-            }
-            .width('100%')
-            .height('100%')
-          })
-        }
       }
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(Color.Transparent)
     .hitTestBehavior(this.shouldBlockHitThrough() ? HitTestMode.Default : HitTestMode.Transparent)
     .onAreaChange((_oldValue: Area, newValue: Area) => {
       this.containerWidth = Number(newValue.width);

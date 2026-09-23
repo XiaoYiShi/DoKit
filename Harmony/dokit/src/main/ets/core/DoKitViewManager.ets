@@ -13,6 +13,9 @@ export class ViewConfig {
   closeHandler?: Callback<void>;
   isFloat: boolean;
   viewPoint: Position;
+  /** SubWindow 贴窗 chrome 用，由 ViewConfigDoKitView 测量后回写 */
+  chromeWidthVp: number = 0;
+  chromeHeightVp: number = 0;
 
   constructor(
     name: string,
@@ -38,6 +41,7 @@ export class DoKitViewManager {
   private static floatingAttachHandler: ((intent: DoKitIntent) => void) | null = null;
   private static floatingDetachHandler: (() => void) | null = null;
   private static windowRefreshHandler: (() => void) | null = null;
+  private static injectOverlayRefreshHandler: (() => void) | null = null;
   private static viewMap: Map<string, ViewConfig> = new Map()
 
   static setToolPanelChangeHandler(handler: ((visible: boolean) => void) | null): void {
@@ -56,9 +60,16 @@ export class DoKitViewManager {
     DoKitViewManager.windowRefreshHandler = handler;
   }
 
+  static setInjectOverlayRefreshHandler(handler: (() => void) | null): void {
+    DoKitViewManager.injectOverlayRefreshHandler = handler;
+  }
+
   static refreshWindow() {
     if (DoKitViewManager.windowRefreshHandler != null) {
       DoKitViewManager.windowRefreshHandler()
+    }
+    if (DoKitViewManager.injectOverlayRefreshHandler !== null) {
+      DoKitViewManager.injectOverlayRefreshHandler();
     }
   }
 
@@ -104,6 +115,24 @@ export class DoKitViewManager {
       list.push(config);
     });
     return list;
+  }
+
+  /** SubWindow layout 只读 viewMap，拖拽后必须把坐标写回 */
+  static updateViewPoint(name: string, x: number, y: number): void {
+    const config = DoKitViewManager.viewMap.get(name);
+    if (config === undefined) {
+      return;
+    }
+    config.viewPoint = { x: x, y: y };
+  }
+
+  static updateViewChromeSize(name: string, widthVp: number, heightVp: number): void {
+    const config = DoKitViewManager.viewMap.get(name);
+    if (config === undefined) {
+      return;
+    }
+    config.chromeWidthVp = widthVp;
+    config.chromeHeightVp = heightVp;
   }
 
   /** 对标 Android DoKitViewManager.attach(DoKitIntent) */

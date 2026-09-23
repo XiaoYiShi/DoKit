@@ -8,9 +8,15 @@ export class PerformanceDokitViewManager {
   private static overlayOpenMap: Map<number, boolean> = new Map();
   private static closeListenerMap: Map<number, PerformanceFragmentCloseListener> = new Map();
   private static overlayChangeHandler: (() => void) | null = null;
+  /** 性能 SubWindow 内 UI 刷新（与主窗 ensureShown/hide 分离，避免互相覆盖） */
+  private static overlayUiRefreshHandler: (() => void) | null = null;
 
   static setOverlayChangeHandler(handler: (() => void) | null): void {
     PerformanceDokitViewManager.overlayChangeHandler = handler;
+  }
+
+  static setOverlayUiRefreshHandler(handler: (() => void) | null): void {
+    PerformanceDokitViewManager.overlayUiRefreshHandler = handler;
   }
 
   static isFpsOverlayOpen(): boolean {
@@ -63,6 +69,9 @@ export class PerformanceDokitViewManager {
   private static notifyChange(): void {
     if (PerformanceDokitViewManager.overlayChangeHandler !== null) {
       PerformanceDokitViewManager.overlayChangeHandler();
+    }
+    if (PerformanceDokitViewManager.overlayUiRefreshHandler !== null) {
+      PerformanceDokitViewManager.overlayUiRefreshHandler();
     }
   }
 }

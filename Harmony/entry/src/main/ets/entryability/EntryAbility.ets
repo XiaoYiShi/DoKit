@@ -1,6 +1,7 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { DoKitSubWindow } from '@didi-hummer/dokit';
 import { App } from '../App';
 
 const DOMAIN = 0x0000;
@@ -20,10 +21,13 @@ export default class EntryAbility extends UIAbility {
     } else {
       hilog.error(DOMAIN, TAG, 'UIAbilityContext is null, skip DoKit init');
     }
+    DoKitSubWindow.attach(windowStage);
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load Index. Cause: %{public}s', JSON.stringify(err));
+        return;
       }
+      DoKitSubWindow.show();
     });
   }
 }

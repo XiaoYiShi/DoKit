@@ -1,6 +1,5 @@
 import promptAction from '@ohos.promptAction';
-import { DoKit, DoKitConstants, DoKitFloatingWindow, DoKitOverlayState } from '@didi-hummer/dokit';
-import { buildEntryCustomFullScreen } from '../dokit/DemoCustomKitRenderers';
+import { DoKit, DoKitConstants, DoKitOverlayState } from '@didi-hummer/dokit';
 import { DoKitItemView, DoKitSectionTitle } from '../module/DoKitItemView';
 import { DemoMenuSection, getDemoMenuSections } from '../module/DemoMenuData';
 import { CrashTest } from '../module/CrashTest';
@@ -117,10 +116,6 @@ struct Index {
       .height('100%')
       .backgroundColor('#F5F6F8')
       .scrollBar(BarState.Off)
-
-      DoKitFloatingWindow({
-        customFullScreenPage: buildEntryCustomFullScreen
-      })
     }
     .width('100%')
     .height('100%')

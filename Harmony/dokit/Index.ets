@@ -1,3 +1,8 @@
+/** 命名路由页 side-effect 注册，宿主 import @didi-hummer/dokit 即生效 */
+import './src/main/ets/subwindow/DoKitSubWindowPage';
+import './src/main/ets/subwindow/DoKitInjectSubWindowPage';
+import './src/main/ets/subwindow/DoKitPerformanceSubWindowPage';
+
 export { DoKit, DoKitBuilder } from './src/main/ets/DoKit';
 export { DoKitConstants } from './src/main/ets/constant/DoKitConstants';
 export { DoKitReal } from './src/main/ets/DoKitReal';
@@ -75,3 +80,4 @@ export { DokitThirdLibInfo } from './src/main/ets/aop/DokitThirdLibInfo';
 export { DoKitSystemUtil } from './src/main/ets/util/DoKitSystemUtil';
 export { DoKitFloatingWindow } from './src/main/ets/components/DoKitFloatingWindow';
 export { DoKitOverlayState } from './src/main/ets/model/DoKitOverlayState';
+export { DoKitSubWindow } from './src/main/ets/subwindow/DoKitSubWindow';

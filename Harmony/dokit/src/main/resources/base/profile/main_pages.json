@@ -1,0 +1,7 @@
+{
+  "src": [
+    "subwindow/DoKitSubWindowPage",
+    "subwindow/DoKitInjectSubWindowPage",
+    "subwindow/DoKitPerformanceSubWindowPage"
+  ]
+}

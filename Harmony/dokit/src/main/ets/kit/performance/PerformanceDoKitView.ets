@@ -9,6 +9,7 @@ export struct PerformanceDoKitView {
   performanceType: number = DataSourceFactory.TYPE_FPS;
   title: string = '帧率';
   unit: string = 'FPS';
+  offsetX: number = 16;
   topOffset: number = 88;
   onClose: () => void = () => {};
   @State private metricValue: string = '0';
@@ -71,7 +72,7 @@ export struct PerformanceDoKitView {
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .backgroundColor('#CC1A1A1A')
     .borderRadius(8)
-    .position({ x: 16, y: this.topOffset })
+    .position({ x: this.offsetX, y: this.topOffset })
     .hitTestBehavior(HitTestMode.Default)
   }
 }
